@@ -1,6 +1,7 @@
 # MCP Logbook API — Security PoC
 
 A proof of concept demonstrating secure access to a maritime logbook system using JWT authentication, Role-Based Access Control (RBAC), multi-tenant data isolation, and audit logging — built with ASP.NET Core 8.
+![Architecture](architecture.svg)
 
 ---
 
