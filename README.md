@@ -118,3 +118,35 @@ Use any of these as the request body for `POST /api/auth/login`.
 - JWT Bearer Authentication (`Microsoft.AspNetCore.Authentication.JwtBearer`)
 - Swagger / Swashbuckle with Bearer token support
 - In-memory audit logging (Singleton service)
+
+---
+
+## OAuth 2.0 vs JWT — Design Note
+
+This PoC implements JWT-based authentication directly via the `/api/auth/login` endpoint for simplicity and portability. In a production MCP deployment, this would be replaced by a full OAuth 2.0 / OpenID Connect flow where:
+
+- Tokens are issued by an external authorization server (e.g. Microsoft Entra ID, Auth0)
+- The MCP server acts as a **resource server** — it only validates tokens, never issues them
+- Clients authenticate via authorization code flow or client credentials flow
+- The `/api/auth/login` endpoint is removed entirely
+
+The JWT validation logic in `Program.cs` and `JwtService.cs` is already structured to support this — swapping the token issuer from the local service to Entra ID requires only updating `appsettings.json`:
+
+```json
+"Jwt": {
+  "Issuer": "https://login.microsoftonline.com/{tenant-id}/v2.0",
+  "Audience": "api://{client-id}"
+}
+```
+
+---
+
+## Microsoft Entra ID Integration
+
+To connect this PoC to Microsoft Entra ID:
+
+1. Register an app in [Azure Portal](https://portal.azure.com) → Azure Active Directory → App Registrations
+2. Set the Audience to your app's `client-id`
+3. Update `appsettings.json` with the Entra issuer URL above
+4. Remove `AuthController.cs` — tokens are now issued by Entra
+5. Users authenticate via `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token`
