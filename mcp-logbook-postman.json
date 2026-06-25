@@ -1,0 +1,140 @@
+{
+  "info": {
+    "name": "MCP Logbook API",
+    "description": "Postman collection for testing MCP Logbook PoC — JWT auth, RBAC, tenant isolation, audit logging.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://localhost:7001",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login as Administrator",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"alice\",\n  \"role\": \"Administrator\",\n  \"tenantId\": \"nordic-shipping\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login as Superintendent",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"bob\",\n  \"role\": \"Superintendent\",\n  \"tenantId\": \"nordic-shipping\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login as VesselUser",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"charlie\",\n  \"role\": \"VesselUser\",\n  \"tenantId\": \"pacific-maritime\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login as ReadOnlyUser",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"diana\",\n  \"role\": \"ReadOnlyUser\",\n  \"tenantId\": \"atlantic-fleet\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "MCP Endpoints",
+      "item": [
+        {
+          "name": "Admin Only",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/mcp/admin"
+          }
+        },
+        {
+          "name": "Superintendent Access",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/mcp/superintendent"
+          }
+        },
+        {
+          "name": "Vessel User Access",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/mcp/vessel"
+          }
+        },
+        {
+          "name": "Read Only Access",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/mcp/readonly"
+          }
+        },
+        {
+          "name": "Get Logbooks (Tenant Isolated)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/mcp/logbooks"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit",
+      "item": [
+        {
+          "name": "Get All Logs (Admin Only)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/audit/all"
+          }
+        },
+        {
+          "name": "Get My Tenant Logs",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/audit/my-tenant"
+          }
+        }
+      ]
+    }
+  ]
+}
