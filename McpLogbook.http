@@ -1,0 +1,6 @@
+@McpLogbook_HostAddress = http://localhost:5151
+
+GET {{McpLogbook_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
