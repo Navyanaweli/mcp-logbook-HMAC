@@ -10,7 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 // ── Core Services ──────────────────────────────────────────────
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddControllers();
-builder.Services.AddScoped<JwtService>();
+builder.Services.AddSingleton<JwtService>();
 builder.Services.AddSingleton<AuditService>();  // Singleton so logs persist across requests
 
 // ── JWT Authentication ─────────────────────────────────────────

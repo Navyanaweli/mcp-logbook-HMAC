@@ -18,15 +18,29 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public IActionResult Login([FromBody] UserInfo user)
     {
-        var token = _jwtService.GenerateToken(user);
+        var response = _jwtService.GenerateTokens(user);
+        return Ok(response);
+    }
 
-        return Ok(new
-        {
-            message = "Login successful",
-            username = user.Username,
-            role = user.Role,
-            tenantId = user.TenantId,
-            token
-        });
+    [HttpPost("refresh")]
+    public IActionResult Refresh([FromBody] RefreshRequest request)
+    {
+        var response = _jwtService.RefreshTokens(request.RefreshToken);
+
+        if (response is null)
+            return Unauthorized(new { message = "Invalid or expired refresh token." });
+
+        return Ok(response);
+    }
+
+    [HttpPost("logout")]
+    public IActionResult Logout([FromBody] RefreshRequest request)
+    {
+        var revoked = _jwtService.RevokeRefreshToken(request.RefreshToken);
+
+        if (!revoked)
+            return BadRequest(new { message = "Refresh token not found." });
+
+        return Ok(new { message = "Logged out successfully. Refresh token revoked." });
     }
 }
