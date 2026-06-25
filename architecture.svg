@@ -1,0 +1,42 @@
+<svg width="100%" viewBox="0 0 680 620" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>MCP Logbook API Architecture</title>
+  <desc>Architecture diagram showing client, authentication, RBAC, MCP endpoints, tenant isolation, and audit logging layers</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect x="240" y="30" width="200" height="50" rx="8" fill="#D3D1C7" stroke="#5F5E5A" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="14" font-weight="500" x="340" y="52" text-anchor="middle" dominant-baseline="central">Client</text>
+  <text font-family="sans-serif" font-size="12" x="340" y="68" text-anchor="middle" dominant-baseline="central" fill="#5F5E5A">Swagger / Postman / App</text>
+  <line x1="340" y1="80" x2="340" y2="118" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text font-family="sans-serif" font-size="12" x="355" y="103" dominant-baseline="central" fill="#5F5E5A">POST /api/auth/login</text>
+  <rect x="200" y="120" width="280" height="56" rx="8" fill="#CECBF6" stroke="#534AB7" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="14" font-weight="500" x="340" y="142" text-anchor="middle" dominant-baseline="central" fill="#3C3489">AuthController</text>
+  <text font-family="sans-serif" font-size="12" x="340" y="160" text-anchor="middle" dominant-baseline="central" fill="#534AB7">Validates user, issues JWT token</text>
+  <line x1="480" y1="148" x2="560" y2="148" stroke="#534AB7" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="562" y="120" width="90" height="56" rx="8" fill="#CECBF6" stroke="#534AB7" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="14" font-weight="500" x="607" y="142" text-anchor="middle" dominant-baseline="central" fill="#3C3489">JwtService</text>
+  <text font-family="sans-serif" font-size="12" x="607" y="160" text-anchor="middle" dominant-baseline="central" fill="#534AB7">Signs token</text>
+  <line x1="340" y1="176" x2="340" y2="218" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text font-family="sans-serif" font-size="12" x="355" y="201" dominant-baseline="central" fill="#5F5E5A">Bearer token</text>
+  <rect x="180" y="220" width="320" height="56" rx="8" fill="#9FE1CB" stroke="#0F6E56" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="14" font-weight="500" x="340" y="242" text-anchor="middle" dominant-baseline="central" fill="#085041">JWT middleware</text>
+  <text font-family="sans-serif" font-size="12" x="340" y="260" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">Validates token, extracts claims</text>
+  <line x1="340" y1="276" x2="340" y2="318" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="180" y="320" width="320" height="56" rx="8" fill="#9FE1CB" stroke="#0F6E56" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="14" font-weight="500" x="340" y="342" text-anchor="middle" dominant-baseline="central" fill="#085041">RBAC policies</text>
+  <text font-family="sans-serif" font-size="12" x="340" y="360" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">AdminOnly / SuperintendentUp / VesselUserUp / ReadOnlyUp</text>
+  <line x1="340" y1="376" x2="340" y2="418" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="160" y="420" width="360" height="56" rx="8" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="14" font-weight="500" x="340" y="442" text-anchor="middle" dominant-baseline="central" fill="#0C447C">McpController</text>
+  <text font-family="sans-serif" font-size="12" x="340" y="460" text-anchor="middle" dominant-baseline="central" fill="#185FA5">/admin · /superintendent · /vessel · /readonly · /logbooks</text>
+  <line x1="250" y1="476" x2="170" y2="518" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="430" y1="476" x2="510" y2="518" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="40" y="520" width="220" height="56" rx="8" fill="#FAC775" stroke="#854F0B" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="14" font-weight="500" x="150" y="542" text-anchor="middle" dominant-baseline="central" fill="#633806">Tenant isolation</text>
+  <text font-family="sans-serif" font-size="12" x="150" y="560" text-anchor="middle" dominant-baseline="central" fill="#854F0B">Filters data by TenantId claim</text>
+  <rect x="420" y="520" width="220" height="56" rx="8" fill="#F5C4B3" stroke="#993C1D" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="14" font-weight="500" x="530" y="542" text-anchor="middle" dominant-baseline="central" fill="#712B13">AuditService</text>
+  <text font-family="sans-serif" font-size="12" x="530" y="560" text-anchor="middle" dominant-baseline="central" fill="#993C1D">Logs user, role, tenant, result</text>
+</svg>
