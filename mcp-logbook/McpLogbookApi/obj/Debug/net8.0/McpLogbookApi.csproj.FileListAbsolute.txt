@@ -41,3 +41,4 @@ C:\Users\navya\OneDrive\Documents\Navtor Project\McpLogbook\mcp-logbook\McpLogbo
 C:\Users\navya\OneDrive\Documents\Navtor Project\McpLogbook\mcp-logbook\McpLogbookApi\bin\Debug\net8.0\Microsoft.AspNetCore.Authentication.JwtBearer.dll
 C:\Users\navya\OneDrive\Documents\Navtor Project\McpLogbook\mcp-logbook\McpLogbookApi\bin\Debug\net8.0\Microsoft.IdentityModel.Protocols.dll
 C:\Users\navya\OneDrive\Documents\Navtor Project\McpLogbook\mcp-logbook\McpLogbookApi\bin\Debug\net8.0\Microsoft.IdentityModel.Protocols.OpenIdConnect.dll
+C:\Users\navya\OneDrive\Documents\Navtor Project\McpLogbook\mcp-logbook\McpLogbookApi\obj\Debug\net8.0\McpLogbookApi.sourcelink.json
