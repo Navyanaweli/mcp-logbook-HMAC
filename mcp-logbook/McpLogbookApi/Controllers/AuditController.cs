@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace McpLogbookApi.Controllers;
 
+// Exposes audit log read endpoints
 [ApiController]
 [Route("api/audit")]
 [Authorize]
@@ -12,7 +13,8 @@ public class AuditController : ControllerBase
 {
     private readonly AuditService _audit;
 
-    private string TenantId => User.FindFirstValue("TenantId") ?? "unknown";
+    // Reads tenant and role from Entra ID JWT claims
+    private string TenantId => User.FindFirstValue("tid") ?? "unknown";
     private string Role     => User.FindFirstValue(ClaimTypes.Role) ?? "unknown";
 
     public AuditController(AuditService audit)
@@ -20,6 +22,7 @@ public class AuditController : ControllerBase
         _audit = audit;
     }
 
+    // Admin only — returns every audit log
     [HttpGet("all")]
     [Authorize(Policy = "AdminOnly")]
     public IActionResult GetAllLogs()
@@ -27,8 +30,9 @@ public class AuditController : ControllerBase
         return Ok(_audit.GetLogs());
     }
 
+    // Superintendent+ — own tenant logs only
     [HttpGet("my-tenant")]
-    [Authorize(Policy = "InspectorUp")]
+    [Authorize(Policy = "SuperintendentUp")]
     public IActionResult GetMyTenantLogs()
     {
         return Ok(_audit.GetLogsForTenant(TenantId));

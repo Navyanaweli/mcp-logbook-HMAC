@@ -1,0 +1,69 @@
+@startuml McpLogbook
+
+skinparam classAttributeIconSize 0
+skinparam class {
+    BackgroundColor White
+    BorderColor Black
+    ArrowColor Black
+}
+
+class McpController {
+    - _audit : AuditService
+    + AdminOnly() : IActionResult
+    + SuperintendentAccess() : IActionResult
+    + VesselUserAccess() : IActionResult
+    + ReadOnlyAccess() : IActionResult
+    + GetLogbooks() : IActionResult
+}
+
+class AuditController {
+    - _audit : AuditService
+    + GetAllLogs() : IActionResult
+    + GetMyTenantLogs() : IActionResult
+}
+
+class AuditService {
+    - _logs : List<AuditEntry>
+    - _logFilePath : string?
+    + Log(user, role, tenantId, ...) : void
+    + GetLogs() : List<AuditEntry>
+    + GetLogsForTenant(tenantId) : List<AuditEntry>
+}
+
+class ObservabilityMiddleware {
+    - _audit : AuditService
+    + InvokeAsync(context) : Task
+}
+
+class AuditEntry <<record>> {
+    + User : string
+    + Role : string
+    + TenantId : string
+    + ClientId : string
+    + Action : string
+    + AuthResult : string
+    + ExecutionStatus : string
+    + HttpMethod : string
+    + StatusCode : int
+    + DurationMs : long
+    + Timestamp : DateTime
+}
+
+class LogbookEntry <<record>> {
+    + Id : string
+    + Title : string
+    + TenantId : string
+}
+
+McpController --> AuditService : uses
+AuditController --> AuditService : uses
+ObservabilityMiddleware --> AuditService : uses
+AuditService --> AuditEntry : creates
+McpController ..> LogbookEntry : returns
+
+note top of McpController
+  Roles: Admin > Superintendent
+  > VesselUser > ReadOnly
+end note
+
+@enduml

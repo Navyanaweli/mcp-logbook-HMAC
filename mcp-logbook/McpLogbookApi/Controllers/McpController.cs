@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Claims;
 using McpLogbookApi.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -5,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace McpLogbookApi.Controllers;
 
+// Logbook access endpoints by role
 [ApiController]
 [Route("api/mcp")]
 [Authorize]
@@ -12,9 +14,11 @@ public class McpController : ControllerBase
 {
     private readonly AuditService _audit;
 
-    private string TenantId => User.FindFirstValue("TenantId") ?? "unknown";
+    // Extracts identity fields from Entra ID JWT claims
+    private string TenantId => User.FindFirstValue("tid") ?? "unknown";
     private string Username => User.FindFirstValue(ClaimTypes.Name) ?? "unknown";
     private string Role     => User.FindFirstValue(ClaimTypes.Role) ?? "unknown";
+    private string ClientId => Request.Headers["X-Client-Id"].FirstOrDefault() ?? "unknown";
 
     public McpController(AuditService audit)
     {
@@ -26,7 +30,8 @@ public class McpController : ControllerBase
     [Authorize(Policy = "AdminOnly")]
     public IActionResult AdminOnly()
     {
-        _audit.Log(Username, Role, TenantId, "Accessed /api/mcp/admin", "Authorized", "Success");
+        var sw = Stopwatch.StartNew();
+        _audit.Log(Username, Role, TenantId, ClientId, "Accessed /api/mcp/admin", "Authorized", "Success", Request.Method, 200, sw.ElapsedMilliseconds);
         return Ok(new { message = "Administrator access granted. Full system control.", accessedBy = Username, tenant = TenantId });
     }
 
@@ -35,7 +40,8 @@ public class McpController : ControllerBase
     [Authorize(Policy = "SuperintendentUp")]
     public IActionResult SuperintendentAccess()
     {
-        _audit.Log(Username, Role, TenantId, "Accessed /api/mcp/superintendent", "Authorized", "Success");
+        var sw = Stopwatch.StartNew();
+        _audit.Log(Username, Role, TenantId, ClientId, "Accessed /api/mcp/superintendent", "Authorized", "Success", Request.Method, 200, sw.ElapsedMilliseconds);
         return Ok(new { message = "Superintendent access granted. Can inspect and approve logbooks.", accessedBy = Username, tenant = TenantId });
     }
 
@@ -44,7 +50,8 @@ public class McpController : ControllerBase
     [Authorize(Policy = "VesselUserUp")]
     public IActionResult VesselUserAccess()
     {
-        _audit.Log(Username, Role, TenantId, "Accessed /api/mcp/vessel", "Authorized", "Success");
+        var sw = Stopwatch.StartNew();
+        _audit.Log(Username, Role, TenantId, ClientId, "Accessed /api/mcp/vessel", "Authorized", "Success", Request.Method, 200, sw.ElapsedMilliseconds);
         return Ok(new { message = "Vessel User access granted. Can submit and edit logbook entries.", accessedBy = Username, tenant = TenantId });
     }
 
@@ -53,7 +60,8 @@ public class McpController : ControllerBase
     [Authorize(Policy = "ReadOnlyUp")]
     public IActionResult ReadOnlyAccess()
     {
-        _audit.Log(Username, Role, TenantId, "Accessed /api/mcp/readonly", "Authorized", "Success");
+        var sw = Stopwatch.StartNew();
+        _audit.Log(Username, Role, TenantId, ClientId, "Accessed /api/mcp/readonly", "Authorized", "Success", Request.Method, 200, sw.ElapsedMilliseconds);
         return Ok(new { message = "Read-Only access granted. Can view logbook records.", accessedBy = Username, tenant = TenantId });
     }
 
@@ -62,21 +70,23 @@ public class McpController : ControllerBase
     [Authorize(Policy = "ReadOnlyUp")]
     public IActionResult GetLogbooks()
     {
-        _audit.Log(Username, Role, TenantId, "Accessed /api/mcp/logbooks", "Authorized", "Success");
+        var sw = Stopwatch.StartNew();
+        // Filters logbooks to current user's tenant
+        var logbooks = GetMockLogbooks().Where(l => l.TenantId == TenantId).ToList();
+        sw.Stop();
 
-        var logbooks = GetMockLogbooks()
-            .Where(l => l.TenantId == TenantId)
-            .ToList();
-
+        // Returns 404 if tenant has no logbooks
         if (!logbooks.Any())
         {
-            _audit.Log(Username, Role, TenantId, "Accessed /api/mcp/logbooks", "Authorized", "NotFound");
+            _audit.Log(Username, Role, TenantId, ClientId, "Accessed /api/mcp/logbooks", "Authorized", "NotFound", Request.Method, 404, sw.ElapsedMilliseconds);
             return NotFound(new { message = "No logbooks found for your tenant.", tenant = TenantId });
         }
 
+        _audit.Log(Username, Role, TenantId, ClientId, "Accessed /api/mcp/logbooks", "Authorized", "Success", Request.Method, 200, sw.ElapsedMilliseconds);
         return Ok(new { tenant = TenantId, accessedBy = Username, count = logbooks.Count, logbooks });
     }
 
+    // Sample data spanning three tenants
     private static List<LogbookEntry> GetMockLogbooks() =>
     [
         new("LOG-001", "Vessel Alpha - Oil Record Book",  "nordic-shipping"),
@@ -87,4 +97,5 @@ public class McpController : ControllerBase
     ];
 }
 
+// Simple logbook entry data shape
 record LogbookEntry(string Id, string Title, string TenantId);
