@@ -16,3 +16,4 @@ obj/
 ## Misc
 *.log
 audit-log.jsonl
+*.db

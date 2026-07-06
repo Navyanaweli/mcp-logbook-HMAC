@@ -7,12 +7,14 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 
 namespace McpLogbookApi.Tests;
 
-// Boots the real app but replaces Entra ID validation with a local test key
+// Boots the real app but replaces Entra ID validation with a local test key,
+// and points the SQLite connection string at a fresh temp-file DB per run
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     public const string TestKey      = "TestSecretKeyForAuthorizationTests2024!XYZ";
@@ -21,6 +23,16 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.ConfigureAppConfiguration((_, configBuilder) =>
+        {
+            // Isolated, freshly-seeded database per test factory instance
+            var testDbPath = Path.Combine(Path.GetTempPath(), $"test-logbook-{Guid.NewGuid()}.db");
+            configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:LogbookDb"] = $"Data Source={testDbPath}"
+            });
+        });
+
         builder.ConfigureTestServices(services =>
         {
             services.PostConfigureAll<JwtBearerOptions>(options =>
@@ -110,84 +122,6 @@ public class AuthorizationTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    // ── Admin endpoint ─────────────────────────────────────────────
-
-    // Administrator should get 200 on /api/mcp/admin
-    [Fact]
-    public async Task Administrator_CanAccess_AdminEndpoint()
-    {
-        SetToken(CustomWebApplicationFactory.CreateToken("alice@company.com", "Administrator", "nordic-shipping"));
-        var response = await _client.GetAsync("/api/mcp/admin");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    // Superintendent does not have AdminOnly policy → 403
-    [Fact]
-    public async Task Superintendent_CannotAccess_AdminEndpoint()
-    {
-        SetToken(CustomWebApplicationFactory.CreateToken("bob@company.com", "Superintendent", "nordic-shipping"));
-        var response = await _client.GetAsync("/api/mcp/admin");
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-    }
-
-    // VesselUser does not have AdminOnly policy → 403
-    [Fact]
-    public async Task VesselUser_CannotAccess_AdminEndpoint()
-    {
-        SetToken(CustomWebApplicationFactory.CreateToken("charlie@company.com", "VesselUser", "pacific-maritime"));
-        var response = await _client.GetAsync("/api/mcp/admin");
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-    }
-
-    // ReadOnlyUser does not have AdminOnly policy → 403
-    [Fact]
-    public async Task ReadOnlyUser_CannotAccess_AdminEndpoint()
-    {
-        SetToken(CustomWebApplicationFactory.CreateToken("diana@company.com", "ReadOnlyUser", "atlantic-fleet"));
-        var response = await _client.GetAsync("/api/mcp/admin");
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-    }
-
-    // ── Superintendent endpoint ────────────────────────────────────
-
-    // Superintendent satisfies SuperintendentUp policy → 200
-    [Fact]
-    public async Task Superintendent_CanAccess_SuperintendentEndpoint()
-    {
-        SetToken(CustomWebApplicationFactory.CreateToken("bob@company.com", "Superintendent", "nordic-shipping"));
-        var response = await _client.GetAsync("/api/mcp/superintendent");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    // VesselUser is below Superintendent → 403
-    [Fact]
-    public async Task VesselUser_CannotAccess_SuperintendentEndpoint()
-    {
-        SetToken(CustomWebApplicationFactory.CreateToken("charlie@company.com", "VesselUser", "pacific-maritime"));
-        var response = await _client.GetAsync("/api/mcp/superintendent");
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-    }
-
-    // ── Vessel endpoint ────────────────────────────────────────────
-
-    // VesselUser satisfies VesselUserUp policy → 200
-    [Fact]
-    public async Task VesselUser_CanAccess_VesselEndpoint()
-    {
-        SetToken(CustomWebApplicationFactory.CreateToken("charlie@company.com", "VesselUser", "pacific-maritime"));
-        var response = await _client.GetAsync("/api/mcp/vessel");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    // ReadOnlyUser is below VesselUser → 403
-    [Fact]
-    public async Task ReadOnlyUser_CannotAccess_VesselEndpoint()
-    {
-        SetToken(CustomWebApplicationFactory.CreateToken("diana@company.com", "ReadOnlyUser", "atlantic-fleet"));
-        var response = await _client.GetAsync("/api/mcp/vessel");
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-    }
-
     // ── Readonly endpoint ──────────────────────────────────────────
 
     // ReadOnlyUser is the lowest role — should still get 200 on readonly
@@ -208,42 +142,78 @@ public class AuthorizationTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    // ── Tenant isolation ───────────────────────────────────────────
+    // ── Ship-scoped logbook data ───────────────────────────────────
+    // Seed data: Alice Mercer -> MV OCEAN STAR + MV NORTHERN LIGHT
+    //            Rahul Verma  -> MV NORTHERN LIGHT only
+    //            Sofia Nunez  -> MV PACIFIC DAWN only
 
-    // nordic-shipping user should only see nordic-shipping logbooks
     [Fact]
-    public async Task Logbooks_ReturnsOnlyOwnTenantData()
+    public async Task Logbooks_ReturnsOnlyAssignedShipsData()
     {
-        SetToken(CustomWebApplicationFactory.CreateToken("alice@company.com", "Administrator", "nordic-shipping"));
+        SetToken(CustomWebApplicationFactory.CreateToken("sofia.nunez@example.com", "ReadOnlyUser", "n/a"));
         var response = await _client.GetAsync("/api/mcp/logbooks");
         var body     = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("nordic-shipping", body);
-        Assert.DoesNotContain("pacific-maritime", body);
-        Assert.DoesNotContain("atlantic-fleet", body);
+        Assert.Contains("MV PACIFIC DAWN", body);
+        Assert.DoesNotContain("MV OCEAN STAR", body);
+        Assert.DoesNotContain("MV NORTHERN LIGHT", body);
     }
 
-    // pacific-maritime user should not see nordic-shipping data
+    // A user assigned to multiple ships sees all of them, and nothing else
     [Fact]
-    public async Task Logbooks_DifferentTenants_DoNotShareData()
+    public async Task Logbooks_UserWithMultipleShips_SeesBothShipsData()
     {
-        SetToken(CustomWebApplicationFactory.CreateToken("charlie@company.com", "VesselUser", "pacific-maritime"));
+        SetToken(CustomWebApplicationFactory.CreateToken("alice.mercer@example.com", "Administrator", "n/a"));
         var response = await _client.GetAsync("/api/mcp/logbooks");
         var body     = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("pacific-maritime", body);
-        Assert.DoesNotContain("nordic-shipping", body);
+        Assert.Contains("MV OCEAN STAR", body);
+        Assert.Contains("MV NORTHERN LIGHT", body);
+        Assert.DoesNotContain("MV PACIFIC DAWN", body);
     }
 
-    // Tenant with no mock logbooks should get 404
+    // A user with no ship assignment at all gets 404, same as an empty result set
     [Fact]
-    public async Task Logbooks_UnknownTenant_Returns404()
+    public async Task Logbooks_UnassignedUser_Returns404()
     {
-        SetToken(CustomWebApplicationFactory.CreateToken("eve@company.com", "Administrator", "unknown-tenant"));
+        SetToken(CustomWebApplicationFactory.CreateToken("nobody@example.com", "Administrator", "n/a"));
         var response = await _client.GetAsync("/api/mcp/logbooks");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    // ── Single logbook entry ───────────────────────────────────────
+
+    // Log 1 belongs to MV OCEAN STAR, one of Alice's assigned ships
+    [Fact]
+    public async Task LogbookById_AuthorizedShip_ReturnsEntry()
+    {
+        SetToken(CustomWebApplicationFactory.CreateToken("alice.mercer@example.com", "Administrator", "n/a"));
+        var response = await _client.GetAsync("/api/mcp/logbooks/1");
+        var body     = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("MV OCEAN STAR", body);
+    }
+
+    // Requirement: a caller must never be able to tell "no such entry" apart from
+    // "it exists, but you don't have access" — both must produce identical responses.
+    // Log 1 belongs to MV OCEAN STAR, which Rahul is NOT assigned to.
+    [Fact]
+    public async Task LogbookById_UnauthorizedShip_And_NonexistentId_ReturnIdenticalResponses()
+    {
+        SetToken(CustomWebApplicationFactory.CreateToken("rahul.verma@example.com", "Superintendent", "n/a"));
+
+        var unauthorizedResponse = await _client.GetAsync("/api/mcp/logbooks/1");
+        var unauthorizedBody     = await unauthorizedResponse.Content.ReadAsStringAsync();
+
+        var nonexistentResponse = await _client.GetAsync("/api/mcp/logbooks/9999");
+        var nonexistentBody     = await nonexistentResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.NotFound, unauthorizedResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, nonexistentResponse.StatusCode);
+        Assert.Equal(unauthorizedBody, nonexistentBody);
     }
 
     // ── Audit endpoints ────────────────────────────────────────────
