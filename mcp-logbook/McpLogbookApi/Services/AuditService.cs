@@ -6,7 +6,7 @@ public class AuditService
 {
     // In-memory list of all audit entries
     private readonly List<AuditEntry> _logs = [];
-    private readonly ILogger<AuditService> _logger;
+    private readonly ILogger<AuditService> _logger; //ASP .Net built in logging system
     // Optional file path for persistent logging
     private readonly string? _logFilePath;
     // Lock prevents concurrent file write conflicts
