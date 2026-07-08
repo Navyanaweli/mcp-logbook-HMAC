@@ -30,6 +30,15 @@ public class McpController : ControllerBase
         _repo = repo;
     }
 
+    // Current user's identity, role, and authorized ships — for the dashboard header
+    [HttpGet("me")]
+    [Authorize(Policy = "ReadOnlyUp")]
+    public IActionResult Me()
+    {
+        var ships = _repo.GetAssignedShips(Username);
+        return Ok(new { username = Username, role = Role, ships });
+    }
+
     // All roles — read-only view of logbooks
     [HttpGet("readonly")]
     [Authorize(Policy = "ReadOnlyUp")]

@@ -1,6 +1,6 @@
-# MCP Logbook API — OAuth 2.0 + Microsoft Entra ID
+# MCP Logbook — NAVTOR Ship Logbook System
 
-A proof of concept demonstrating secure access to a maritime logbook system using **OAuth 2.0 via Microsoft Entra ID**, Role-Based Access Control (RBAC), multi-tenant data isolation, and audit logging — built with ASP.NET Core 8.
+A demo maritime logbook system: an ASP.NET Core 8 API (with a real Entra ID OAuth 2.0 path and an MCP tool server) backed by SQLite, plus an Angular dashboard currently wired to a mock demo login. Each part below is self-contained — read top to bottom for the full picture, or jump to the part you need.
 
 ![Architecture](architecture.svg)
 
@@ -8,112 +8,235 @@ A proof of concept demonstrating secure access to a maritime logbook system usin
 
 ## Table of Contents
 
-1. [Project Overview](#project-overview)
-2. [Project Structure](#project-structure)
-3. [Tech Stack](#tech-stack)
-4. [Setup & Run](#setup--run)
-5. [Configuration](#configuration)
-6. [Entra ID Setup](#entra-id-setup)
-7. [File-by-File Breakdown](#file-by-file-breakdown)
-   - [Program.cs](#programcs)
-   - [Services/AuditService.cs](#servicesauditservicecs)
-   - [Middleware/ObservabilityMiddleware.cs](#middlewareobservabilitymiddlewarecs)
-   - [Controllers/McpController.cs](#controllersmcpcontrollercs)
-   - [Controllers/AuditController.cs](#controllersauditcontrollercs)
-8. [Authentication Flow (OAuth 2.0)](#authentication-flow-oauth-20)
-9. [Entra ID JWT Claims](#entra-id-jwt-claims)
-10. [Roles & Permission Matrix](#roles--permission-matrix)
-11. [Tenant Isolation](#tenant-isolation)
-12. [Audit Logging](#audit-logging)
-13. [Unit Tests](#unit-tests)
-14. [Sample Test Users](#sample-test-users)
+- [Part 1 — What This Project Is](#part-1--what-this-project-is)
+- [Part 2 — Architecture at a Glance](#part-2--architecture-at-a-glance)
+- [Part 3 — Backend: ASP.NET Core API](#part-3--backend-aspnet-core-api)
+- [Part 4 — Database: SQLite Schema](#part-4--database-sqlite-schema)
+- [Part 5 — MCP Server & Tools](#part-5--mcp-server--tools)
+- [Part 6 — Authentication & Authorization](#part-6--authentication--authorization)
+- [Part 7 — Frontend: Angular UI](#part-7--frontend-angular-ui)
+- [Part 8 — Setup & Run](#part-8--setup--run)
+- [Part 9 — Testing](#part-9--testing)
+- [Part 10 — Configuration Reference](#part-10--configuration-reference)
+- [Part 11 — Current Status & What's Not Done Yet](#part-11--current-status--whats-not-done-yet)
 
 ---
 
-## Project Overview
+## Part 1 — What This Project Is
 
-This API simulates a maritime MCP (Marine Cyber Platform) logbook system where different shipboard roles have different levels of access. It uses **OAuth 2.0 with Microsoft Entra ID** as the external authorization server — the API never issues or stores tokens, it only validates them.
+This simulates a maritime logbook platform where ships log operational entries (departures, cargo, weather, bunkering, etc.), and users only see the ships they're assigned to. It has four moving pieces:
 
-**Key security features:**
-- **OAuth 2.0 / Entra ID** — tokens are issued by Microsoft, not by this API
-- **RBAC (Role-Based Access Control)** — endpoints locked to specific roles via named policies
-- **Multi-Tenant Isolation** — users only see logbook data belonging to their own company
-- **Audit Logging** — every access attempt (authorized or denied) is recorded with full context
+1. **A REST API** (`mcp-logbook/McpLogbookApi`) — real, Entra ID OAuth-protected endpoints
+2. **A SQLite database** — `Users`, `Ships`, `UserShipRelationship`, `ShipDetail`, `ShipLogTable`
+3. **An MCP tool server** — the same logbook data exposed as callable tools for an AI client, via the official Model Context Protocol C# SDK
+4. **An Angular dashboard** (`logbook-ui`) — currently uses a **mock demo login** (pick a seeded user from a dropdown), not real Microsoft sign-in yet — see [Part 6](#part-6--authentication--authorization)
+
+All four share one rule: a user only ever sees logbook entries for ships they're assigned to, enforced entirely on the backend.
 
 ---
 
-## Project Structure
+## Part 2 — Architecture at a Glance
 
 ```
-McpLogbook/
-├── README.md
-├── mcp-logbook/
-│   └── McpLogbookApi/
-│       ├── Controllers/
-│       │   ├── McpController.cs            # Protected logbook endpoints (RBAC)
-│       │   └── AuditController.cs          # Audit log retrieval endpoints
-│       ├── Middleware/
-│       │   └── ObservabilityMiddleware.cs  # Captures 401/403 failed requests
-│       ├── Services/
-│       │   └── AuditService.cs             # Records and retrieves audit log entries
-│       ├── appsettings.json                # Entra ID config, log file path
-│       └── Program.cs                      # App bootstrap, DI, middleware pipeline
-└── McpLogbookApi.Tests/
-    ├── AuditServiceTests.cs                # Unit tests for AuditService
-    └── McpLogbookApi.Tests.csproj          # Test project config
+Angular UI (logbook-ui)
+   │
+   │  demo login (mock) ──────────┐
+   │                              │
+   ▼                              ▼
+DemoController              McpController + LogbookTools (MCP)
+(unauthenticated,            (Entra ID OAuth-protected)
+ demo/testing only)                 │
+   │                                │
+   └──────────────┬─────────────────┘
+                   ▼
+           LogbookRepository
+                   │
+                   ▼
+         SQLite (logbook.db)
+   Users · Ships · UserShipRelationship
+        · ShipDetail · ShipLogTable
 ```
 
+Both the demo path and the real OAuth path converge on the same `LogbookRepository` — ship-scoped access control is identical either way; only the "who is calling" step differs. See `uml-diagram.puml` for a full class/schema diagram of the backend.
 
 ---
 
-## Tech Stack
+## Part 3 — Backend: ASP.NET Core API
 
-| Technology | Purpose |
+**Path:** `mcp-logbook/McpLogbookApi/`
+
+```
+McpLogbookApi/
+├── Controllers/
+│   ├── McpController.cs      # Real, OAuth-protected endpoints
+│   ├── AuditController.cs    # Audit log retrieval
+│   └── DemoController.cs     # ⚠️ Unauthenticated demo-login endpoints
+├── Services/
+│   ├── LogbookRepository.cs  # All ship-scoped SQLite queries
+│   └── AuditService.cs       # Records/retrieves audit log entries
+├── Tools/
+│   └── LogbookTools.cs       # MCP tools (see Part 5)
+├── Data/
+│   ├── schema.sql / seed_data.sql
+│   └── DatabaseInitializer.cs
+├── Models/                   # ShipLogEntry, AssignedShip, DemoUser, AuditEntry records
+├── Middleware/
+│   └── ObservabilityMiddleware.cs   # Logs 401/403 before they reach a controller
+├── appsettings.json
+└── Program.cs                 # DI, auth, CORS, MCP registration, middleware pipeline
+```
+
+**Tech stack:** ASP.NET Core 8, `Microsoft.Data.Sqlite` (raw ADO.NET, no ORM), `ModelContextProtocol`/`ModelContextProtocol.AspNetCore`, JWT Bearer + Entra ID, Swagger/Swashbuckle, xUnit.
+
+### McpController — real endpoints (`/api/mcp`, policy `ReadOnlyUp` unless noted)
+
+| Method | Route | Description |
+|---|---|---|
+| GET | `/api/mcp/me` | Current user's identity, role, and assigned ships |
+| GET | `/api/mcp/readonly` | Demo/role-check endpoint, no real data |
+| GET | `/api/mcp/logbooks` | Logbook entries for the caller's assigned ships |
+| GET | `/api/mcp/logbooks/{id}` | Single entry — identical 404 whether it doesn't exist or isn't yours |
+
+### AuditController (`/api/audit`)
+
+| Method | Route | Policy | Description |
+|---|---|---|---|
+| GET | `/api/audit/all` | `AdminOnly` | Full audit log, all users |
+| GET | `/api/audit/my-tenant` | `SuperintendentUp` | Audit log scoped to caller's tenant claim |
+
+### DemoController — ⚠️ demo/testing only (`/api/demo`, no auth)
+
+See [Part 6](#part-6--authentication--authorization) for why this exists. Mirrors `McpController`'s shape exactly, but takes `email` as an explicit query parameter instead of reading it from a validated token:
+
+| Method | Route | Description |
+|---|---|---|
+| GET | `/api/demo/users` | Lists all seeded demo users (for the UI's login dropdown) |
+| GET | `/api/demo/me?email=` | Identity/role/ships for the given demo user |
+| GET | `/api/demo/logbooks?email=` | Ship-scoped logbook list for the given demo user |
+| GET | `/api/demo/logbooks/{id}?email=` | Single entry, same identical-404 behavior as the real endpoint |
+
+---
+
+## Part 4 — Database: SQLite Schema
+
+**Path:** `mcp-logbook/McpLogbookApi/Data/schema.sql` (+ `seed_data.sql`)
+
+| Table | Purpose |
 |---|---|
-| ASP.NET Core 8 Web API | HTTP server and routing |
-| OAuth 2.0 / Microsoft Entra ID | External authorization server — issues all tokens |
-| JWT Bearer (`Microsoft.AspNetCore.Authentication.JwtBearer`) | Validates Entra ID tokens on every request |
-| OpenID Connect Discovery | Automatically fetches Entra ID signing keys |
-| Swagger / Swashbuckle | API documentation with Bearer token UI |
-| xUnit | Unit testing framework |
+| `Users` | `UserId`, `UserName`, `Email` (unique) |
+| `Ships` | `ShipId`, `ShipName` |
+| `UserShipRelationship` | Many-to-many join: which users can access which ships |
+| `ShipDetail` | Extended ship metadata (IMO number, flag state, tonnage, etc.) — one row per ship |
+| `ShipLogTable` | The actual logbook entries: `ShipLogId`, `ShipId`, `LogText`, `LogDate` |
+
+`DatabaseInitializer.EnsureCreated()` runs both `.sql` files once, automatically, the first time the app starts and `logbook.db` doesn't exist yet — no manual migration step. Seeded demo users: **Alice Mercer** (2 ships), **Rahul Verma** (1 ship), **Sofia Nunez** (1 ship).
+
+Every read — REST, MCP tool, or demo — ultimately runs one of four `LogbookRepository` queries: assigned ship IDs, assigned ships (with names), logs for a set of ships, or a single log by ID. None of them ever return data for a ship the caller isn't assigned to.
 
 ---
 
-## Setup & Run
+## Part 5 — MCP Server & Tools
+
+**Path:** `mcp-logbook/McpLogbookApi/Tools/LogbookTools.cs`
+
+Beyond the REST API, the same logbook data is exposed via the [Model Context Protocol](https://modelcontextprotocol.io) so an AI client (not just a browser) can call it directly as tools:
+
+```csharp
+builder.Services.AddMcpServer()
+    .WithHttpTransport(options => options.Stateless = true)
+    .WithToolsFromAssembly();
+...
+app.MapMcp("/mcp").RequireAuthorization("ReadOnlyUp");
+```
+
+| Tool (registered name) | What it does |
+|---|---|
+| `get_logbook_entries` | Lists entries for the caller's assigned ships |
+| `search_logbook_entries` | Same, filtered by a text query against the log entry |
+| `get_logbook_entry_by_id` | Single entry — returns nothing if it doesn't exist or isn't the caller's ship |
+
+**Read-only by design** — there is no create/update/delete tool anywhere in the project. `/mcp` sits behind the exact same Entra ID JWT Bearer auth and `ReadOnlyUp` policy as the REST endpoints; it's a second protocol on top of the same authorization, not a separate security model.
+
+---
+
+## Part 6 — Authentication & Authorization
+
+There are **two parallel identity paths** right now, and they must not be confused:
+
+### The real path — Entra ID OAuth 2.0 (McpController, LogbookTools)
+
+- `Program.cs` configures `AddAuthentication().AddJwtBearer(...)` with `Authority`/`Audience` pointed at your Entra ID tenant. The API never issues tokens — it only validates ones Microsoft already signed.
+- Four RBAC policies, checked via the token's `roles` claim: `AdminOnly`, `SuperintendentUp`, `ReadOnlyUp` (a fourth-tier `VesselUser` role also exists but no longer has its own dedicated endpoint).
+- This is fully implemented and tested, but **the Angular UI is not wired to it yet** — that requires Azure Portal setup (App Registration redirect URI, exposed API scope, permissions/consent) that hasn't been done in this environment.
+
+### The demo path — mock login (DemoController, current Angular UI)
+
+- ⚠️ **Not real authentication.** The UI shows a dropdown of seeded database users; picking one just stores their email client-side. No password, no token, no Microsoft account.
+- `DemoController` deliberately has no `[Authorize]` — it trusts the `email` query parameter directly instead of a validated claim.
+- **What is *not* mocked:** ship-level access control. Both paths call the identical `LogbookRepository` methods, so "can this user see this ship's logs" is enforced by the same real logic either way — only the "who is this user" step is faked.
+- This exists purely so the UI can be developed/tested without Azure setup. It should never be exposed outside local development.
+
+### Shared security property
+
+Both `GET /api/mcp/logbooks/{id}` and `GET /api/demo/logbooks/{id}` return the **exact same response** whether a logbook entry doesn't exist at all or exists but belongs to a ship the caller isn't assigned to (`"Logbook entry not found."` / `"Logbook entry not found or you do not have access."`). This is intentional — it prevents a caller from ever confirming that a restricted record exists.
+
+---
+
+## Part 7 — Frontend: Angular UI
+
+**Path:** `logbook-ui/` — see its own [README](logbook-ui/README.md) for full detail; summary here:
+
+- Angular 9, plain `HttpClient`, dark NAVTOR-themed dashboard
+- Login screen: dropdown of demo users → dashboard showing username, role, assigned ships, entry count, a searchable/browsable logbook table
+- Calls **only** `/api/demo/*` today (see Part 6)
+- Built to make real Entra ID/MSAL login easy to add later as a **second** login option alongside the demo dropdown, not a replacement — see the extension-point comments in `logbook-ui/src/app/services/auth.service.ts` and `app.component.html`
+
+---
+
+## Part 8 — Setup & Run
 
 ### Prerequisites
-
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- An active Microsoft Entra ID (Azure AD) tenant
-- Visual Studio 2022 or Visual Studio Code
+- Node.js + npm (Angular 9 tooling; developed against Node 16)
 
-### Steps
-
-```bash
-git clone https://github.com/Navyanaweli/mcp-logbook-poc.git
-cd mcp-logbook-poc/mcp-logbook/McpLogbookApi
-dotnet restore
-dotnet run
-```
-
-Swagger UI will be available at:
-
-```
-https://localhost:{port}/swagger
-```
-
-### Running Tests
+### Run both together
 
 ```bash
-cd McpLogbookApi.Tests
-dotnet test
+# Terminal 1 — API
+cd mcp-logbook/McpLogbookApi
+dotnet run --urls http://localhost:5044
+
+# Terminal 2 — Angular UI
+cd logbook-ui
+npm install
+npx ng serve --port 4200
 ```
+
+Open `http://localhost:4200`, pick a demo user, and log in. Swagger for the API is at `http://localhost:5044/swagger`. CORS on the backend is scoped specifically to `http://localhost:4200`.
+
+### Running the real OAuth path instead (Swagger only, no UI yet)
+
+Follow [Part 10](#part-10--configuration-reference) to fill in real Entra ID values, then obtain a token per your app registration's flow and paste it into Swagger's **Authorize** dialog as `Bearer <token>`.
 
 ---
 
-## Configuration
+## Part 9 — Testing
 
-All Entra ID and logging settings live in `appsettings.json`:
+**Path:** `McpLogbookApi.Tests/`
+
+```bash
+dotnet test McpLogbookApi.Tests
+```
+
+17 tests, all passing:
+- **`AuditServiceTests.cs`** — `AuditService` in isolation (log storage, tenant filtering)
+- **`AuthorizationTests.cs`** — boots the real app via `WebApplicationFactory`, with Entra ID validation swapped for a local test key so it runs fully offline. Covers: unauthenticated requests, RBAC per role, ship-scoped isolation (including a multi-ship user), identical-response behavior for restricted vs. nonexistent logbook IDs, and audit endpoint access control.
+
+---
+
+## Part 10 — Configuration Reference
+
+### Backend — `mcp-logbook/McpLogbookApi/appsettings.json`
 
 ```json
 {
@@ -122,392 +245,35 @@ All Entra ID and logging settings live in `appsettings.json`:
     "ClientId": "your-entra-client-id",
     "Authority": "https://login.microsoftonline.com/your-entra-tenant-id/v2.0"
   },
+  "ConnectionStrings": {
+    "LogbookDb": "Data Source=Data/logbook.db"
+  },
   "AuditLog": {
     "FilePath": "audit-log.jsonl"
   }
 }
 ```
 
-| Key | Description |
-|---|---|
-| `AzureAd:TenantId` | Your Entra ID directory (tenant) ID |
-| `AzureAd:ClientId` | Your registered app's client ID — used as the token audience |
-| `AzureAd:Authority` | Entra ID token endpoint — API fetches signing keys from here automatically |
-| `AuditLog:FilePath` | File where audit entries are appended as JSON lines |
+To connect the real OAuth path to an actual Entra ID tenant: register an app in [Azure Portal](https://portal.azure.com), add the four App Roles (`Administrator`, `Superintendent`, `VesselUser`, `ReadOnlyUser`), assign them to test users, then fill in the values above.
 
-> Replace all `your-entra-*` placeholder values with your real Entra ID app registration details.
+### Frontend — `logbook-ui/src/environments/environment.ts`
+
+```ts
+export const environment = {
+  production: false,
+  apiBaseUrl: 'http://localhost:5044'
+};
+```
+
+No Azure values needed today — the demo login doesn't require any. This is where MSAL config would be reintroduced later.
 
 ---
 
-## Entra ID Setup
-
-Follow these steps to connect the API to Microsoft Entra ID:
-
-**1. Register the API app**
-- Go to [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App Registrations** → **New Registration**
-- Name it `McpLogbookApi`
-- Copy the **Application (client) ID** → paste into `AzureAd:ClientId`
-- Copy the **Directory (tenant) ID** → paste into `AzureAd:TenantId`
-- Update `AzureAd:Authority` with your tenant ID
-
-**2. Add App Roles**
-- In your app registration → **App Roles** → **Create App Role** for each role:
-
-| Role Display Name | Value | Assigned to |
-|---|---|---|
-| Administrator | `Administrator` | Users / Groups |
-| Superintendent | `Superintendent` | Users / Groups |
-| VesselUser | `VesselUser` | Users / Groups |
-| ReadOnlyUser | `ReadOnlyUser` | Users / Groups |
-
-**3. Assign roles to users**
-- Go to **Enterprise Applications** → find your app → **Users and Groups** → **Add User** → assign a role
-
-**4. Get a token for testing**
-```
-POST https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=password
-&client_id={client-id}
-&username={user@yourdomain.com}
-&password={password}
-&scope=api://{client-id}/.default
-```
-
-Paste the returned `access_token` into the Swagger **Authorize** field as `Bearer <token>`.
-
----
-
-## File-by-File Breakdown
-
----
-
-### Program.cs
-
-**Path:** `mcp-logbook/McpLogbookApi/Program.cs`
-
-The application entry point. Registers services, configures OAuth, and sets up the middleware pipeline.
-
-**1. Core Services**
-```csharp
-builder.Services.AddSingleton<AuditService>();
-```
-Registered as a Singleton so the in-memory audit log persists across all requests. `JwtService` has been removed — Entra ID handles token issuance entirely.
-
-**2. OAuth 2.0 / Entra ID Authentication**
-```csharp
-options.Authority = azureAd["Authority"];
-options.Audience  = azureAd["ClientId"];
-```
-By setting `Authority`, ASP.NET Core automatically fetches the OpenID Connect discovery document from Entra ID and downloads the public signing keys. There is no hardcoded secret key — Microsoft's public key infrastructure is used instead.
-
-```csharp
-NameClaimType = "preferred_username",
-RoleClaimType = "roles"
-```
-Maps Entra ID's claim names to standard ASP.NET Core claim types so `ClaimTypes.Name` and `ClaimTypes.Role` work correctly throughout the app.
-
-**3. Authorization Policies**
-```csharp
-options.AddPolicy("AdminOnly",        policy => policy.RequireRole("Administrator"));
-options.AddPolicy("SuperintendentUp", policy => policy.RequireRole("Administrator", "Superintendent"));
-options.AddPolicy("VesselUserUp",     policy => policy.RequireRole("Administrator", "Superintendent", "VesselUser"));
-options.AddPolicy("ReadOnlyUp",       policy => policy.RequireRole("Administrator", "Superintendent", "VesselUser", "ReadOnlyUser"));
-```
-These policies read the `roles` claim from the Entra ID token. No changes needed here when moving from local JWT to OAuth.
-
-**4. Middleware Pipeline**
-```csharp
-app.UseMiddleware<ObservabilityMiddleware>(); // must come before auth
-app.UseAuthentication();
-app.UseAuthorization();
-```
-Order matters — `ObservabilityMiddleware` must wrap auth so it can see and log 401/403 failures after they are produced.
-
----
-
-### Services/AuditService.cs
-
-**Path:** `mcp-logbook/McpLogbookApi/Services/AuditService.cs`
-
-Records every API event for security and compliance. Unchanged from the JWT version — it only stores and retrieves entries, with no dependency on how tokens are issued.
-
-**`Log(...)` method** — Takes 10 parameters, creates an `AuditEntry`, adds it to the in-memory list, emits a structured log line, and optionally appends a JSON line to the audit file.
-
-**`AuditEntry` record fields:**
-
-| Field | Description |
-|---|---|
-| `User` | Username from the `preferred_username` claim |
-| `Role` | Role from the `roles` claim |
-| `TenantId` | Tenant from the `tid` claim |
-| `ClientId` | Value of the `X-Client-Id` request header |
-| `Action` | Endpoint that was accessed |
-| `AuthResult` | `"Authorized"` / `"Denied"` / `"Unauthenticated"` |
-| `ExecutionStatus` | `"Success"` / `"NotFound"` / `"Error"` / `"Blocked"` |
-| `HttpMethod` | GET, POST, etc. |
-| `StatusCode` | HTTP response code |
-| `DurationMs` | Request duration in milliseconds |
-| `Timestamp` | UTC time the event occurred |
-
----
-
-### Middleware/ObservabilityMiddleware.cs
-
-**Path:** `mcp-logbook/McpLogbookApi/Middleware/ObservabilityMiddleware.cs`
-
-Intercepts requests rejected by the authentication or authorization layer and logs them to `AuditService`.
-
-**Why it exists:** Controllers only run when a request passes auth. If a request is rejected with 401 or 403, no controller runs — so this middleware catches those failures.
-
-**Entra ID claim names used:**
-```csharp
-var user     = context.User?.FindFirstValue("preferred_username") ?? "anonymous";
-var role     = context.User?.FindFirstValue("roles") ?? "unknown";
-var tenantId = context.User?.FindFirstValue("tid") ?? "unknown";
-```
-
-- `401 Unauthenticated` — no valid Entra ID token was provided
-- `403 Denied` — token was valid but the role was not sufficient for the endpoint
-
----
-
-### Controllers/McpController.cs
-
-**Path:** `mcp-logbook/McpLogbookApi/Controllers/McpController.cs`
-
-**Route:** `api/mcp`
-
-The main protected resource controller. All endpoints require a valid Entra ID token.
-
-**Entra ID claim helpers:**
-```csharp
-private string TenantId => User.FindFirstValue("tid") ?? "unknown";
-private string Username => User.FindFirstValue(ClaimTypes.Name) ?? "unknown";  // preferred_username
-private string Role     => User.FindFirstValue(ClaimTypes.Role) ?? "unknown";  // roles
-private string ClientId => Request.Headers["X-Client-Id"].FirstOrDefault() ?? "unknown";
-```
-
-The `tid` claim is the Entra ID **tenant ID** — a unique GUID per organization. This is what drives tenant isolation.
-
-**Endpoints:**
-
-| Method | Route | Policy | Access |
-|---|---|---|---|
-| GET | `/api/mcp/admin` | `AdminOnly` | Administrator only |
-| GET | `/api/mcp/superintendent` | `SuperintendentUp` | Administrator + Superintendent |
-| GET | `/api/mcp/vessel` | `VesselUserUp` | Administrator + Superintendent + VesselUser |
-| GET | `/api/mcp/readonly` | `ReadOnlyUp` | All four roles |
-| GET | `/api/mcp/logbooks` | `ReadOnlyUp` | All four roles (filtered by `tid`) |
-
----
-
-### Controllers/AuditController.cs
-
-**Path:** `mcp-logbook/McpLogbookApi/Controllers/AuditController.cs`
-
-**Route:** `api/audit`
-
-Exposes audit log retrieval. Uses the `tid` claim from the Entra ID token to scope results per tenant.
-
-**`GET /api/audit/all`** — `AdminOnly`
-Returns the full audit log across all tenants.
-
-**`GET /api/audit/my-tenant`** — `SuperintendentUp`
-Returns only entries where `TenantId` matches the calling user's `tid` claim.
-
----
-
-## Authentication Flow (OAuth 2.0)
-
-With Entra ID, this API is a **resource server** — it never issues tokens. Clients obtain tokens directly from Microsoft.
-
-```
-Client                     Entra ID                    API
-  |                            |                         |
-  |  POST /oauth2/v2.0/token   |                         |
-  |  { client_id, credentials }|                         |
-  |--------------------------->|                         |
-  |                            |  Validates credentials  |
-  |  { access_token }          |                         |
-  |<---------------------------|                         |
-  |                                                      |
-  |  GET /api/mcp/logbooks                               |
-  |  Authorization: Bearer <access_token>                |
-  |----------------------------------------------------->|
-  |                                                      |  Fetches Entra ID public keys
-  |                                                      |  (from Authority discovery endpoint)
-  |                                                      |  Validates signature, expiry, audience
-  |                                                      |  Extracts tid, preferred_username, roles
-  |                                                      |  Checks ReadOnlyUp policy
-  |                                                      |  Filters logbooks by tid
-  |                                                      |  AuditService.Log() called
-  |  200 OK { logbooks }                                 |
-  |<-----------------------------------------------------|
-```
-
----
-
-## Entra ID JWT Claims
-
-Entra ID tokens use different claim names from a locally issued JWT:
-
-| What | Old (local JWT) | Entra ID claim |
-|---|---|---|
-| Username | `ClaimTypes.Name` | `preferred_username` |
-| Role | `ClaimTypes.Role` | `roles` |
-| Tenant | `TenantId` (custom) | `tid` (built-in) |
-
-The `TokenValidationParameters` in `Program.cs` maps these so the rest of the app still uses standard ASP.NET Core claim types.
-
----
-
-## Roles & Permission Matrix
-
-Roles are assigned in Entra ID as **App Roles** and arrive in the token's `roles` claim.
-
-| Endpoint | Administrator | Superintendent | VesselUser | ReadOnlyUser |
-|---|:---:|:---:|:---:|:---:|
-| `GET /api/mcp/admin` | ✅ | ❌ | ❌ | ❌ |
-| `GET /api/mcp/superintendent` | ✅ | ✅ | ❌ | ❌ |
-| `GET /api/mcp/vessel` | ✅ | ✅ | ✅ | ❌ |
-| `GET /api/mcp/readonly` | ✅ | ✅ | ✅ | ✅ |
-| `GET /api/mcp/logbooks` | ✅ | ✅ | ✅ | ✅ |
-| `GET /api/audit/all` | ✅ | ❌ | ❌ | ❌ |
-| `GET /api/audit/my-tenant` | ✅ | ✅ | ❌ | ❌ |
-
----
-
-## Tenant Isolation
-
-Every Entra ID token contains a `tid` claim — a GUID uniquely identifying the user's organization. The `/api/mcp/logbooks` endpoint filters logbook data by this value:
-
-```csharp
-private string TenantId => User.FindFirstValue("tid") ?? "unknown";
-
-var logbooks = GetMockLogbooks().Where(l => l.TenantId == TenantId).ToList();
-```
-
-A user from one organization cannot see another organization's data — even with the same role. The `tid` value is set by Entra ID and cannot be forged because the token is signed by Microsoft's private key.
-
-> **Note:** In the mock data, tenant IDs use friendly names like `nordic-shipping`. In a real Entra ID deployment, `tid` would be a GUID like `72f988bf-86f1-41af-91ab-2d7cd011db47`. You would need a lookup table to map GUIDs to names.
-
----
-
-## Audit Logging
-
-Every request to a protected endpoint is logged — both successes and failures. The `ObservabilityMiddleware` captures 401/403 failures before they reach any controller.
-
-**Audit log file (`audit-log.jsonl`):**
-Each entry is a single JSON line, making it easy to parse or load into a SIEM / log aggregator.
-
-**Example entry:**
-```json
-{
-  "User": "alice@company.com",
-  "Role": "Administrator",
-  "TenantId": "72f988bf-86f1-41af-91ab-2d7cd011db47",
-  "ClientId": "claude-3",
-  "Action": "Accessed /api/mcp/admin",
-  "AuthResult": "Authorized",
-  "ExecutionStatus": "Success",
-  "HttpMethod": "GET",
-  "StatusCode": 200,
-  "DurationMs": 5,
-  "Timestamp": "2025-06-30T10:00:00Z"
-}
-```
-
----
-
-## Unit Tests
-
-**Path:** `McpLogbookApi.Tests/`
-
-The test suite has two files covering both service logic and full HTTP authorization behaviour. All 23 tests pass.
-
-```bash
-dotnet test McpLogbookApi.Tests
-```
-
----
-
-### AuditServiceTests.cs
-
-Tests `AuditService` in complete isolation using a `NoOpLogger`. No HTTP stack involved.
-
-| Test | What it verifies |
-|---|---|
-| `Log_AddsEntryToList` | A logged entry is stored with all fields correct |
-| `GetLogsForTenant_ReturnsOnlyMatchingTenant` | Cross-tenant entries are excluded |
-| `GetLogsForTenant_ReturnsEmpty_WhenNoMatch` | Unknown tenant returns empty list |
-| `GetLogs_ReturnsAllLogs` | All entries across all tenants are returned |
-
----
-
-### AuthorizationTests.cs
-
-Integration tests that boot the **real ASP.NET Core app** via `WebApplicationFactory` and send actual HTTP requests. The Entra ID token validation is overridden with a local HMAC key so tests run offline — no Azure connection needed. The same claim names (`preferred_username`, `roles`, `tid`) and claim mappings (`MapInboundClaims = false`) used in production are applied in tests, so the policies behave identically.
-
-**Unauthenticated:**
-
-| Test | What it verifies |
-|---|---|
-| `NoToken_Returns401` | Missing token → 401 |
-| `InvalidToken_Returns401` | Garbage token string → 401 |
-
-**Role-Based Access Control (per endpoint):**
-
-| Test | What it verifies |
-|---|---|
-| `Administrator_CanAccess_AdminEndpoint` | Admin → 200 on `/api/mcp/admin` |
-| `Superintendent_CannotAccess_AdminEndpoint` | Superintendent → 403 on `/api/mcp/admin` |
-| `VesselUser_CannotAccess_AdminEndpoint` | VesselUser → 403 on `/api/mcp/admin` |
-| `ReadOnlyUser_CannotAccess_AdminEndpoint` | ReadOnly → 403 on `/api/mcp/admin` |
-| `Superintendent_CanAccess_SuperintendentEndpoint` | Superintendent → 200 on `/api/mcp/superintendent` |
-| `VesselUser_CannotAccess_SuperintendentEndpoint` | VesselUser → 403 on `/api/mcp/superintendent` |
-| `VesselUser_CanAccess_VesselEndpoint` | VesselUser → 200 on `/api/mcp/vessel` |
-| `ReadOnlyUser_CannotAccess_VesselEndpoint` | ReadOnly → 403 on `/api/mcp/vessel` |
-| `ReadOnlyUser_CanAccess_ReadonlyEndpoint` | ReadOnly → 200 on `/api/mcp/readonly` |
-| `Administrator_CanAccess_ReadonlyEndpoint` | Admin satisfies all policies |
-
-**Tenant Isolation:**
-
-| Test | What it verifies |
-|---|---|
-| `Logbooks_ReturnsOnlyOwnTenantData` | `nordic-shipping` user sees no `pacific-maritime` data |
-| `Logbooks_DifferentTenants_DoNotShareData` | `pacific-maritime` user sees no `nordic-shipping` data |
-| `Logbooks_UnknownTenant_Returns404` | Tenant with no logbooks → 404 |
-
-**Audit Endpoints:**
-
-| Test | What it verifies |
-|---|---|
-| `Administrator_CanAccess_AllAuditLogs` | Admin → 200 on `/api/audit/all` |
-| `Superintendent_CanAccess_TenantAuditLogs` | Superintendent → 200 on `/api/audit/my-tenant` |
-| `Superintendent_CannotAccess_AllAuditLogs` | Superintendent → 403 on `/api/audit/all` |
-| `VesselUser_CannotAccess_AuditLogs` | VesselUser → 403 on `/api/audit/my-tenant` |
-
-**Expected output:**
-```
-Passed! - Failed: 0, Passed: 23, Skipped: 0, Total: 23
-```
-
----
-
-## Sample Test Users
-
-Create these users in your Entra ID tenant and assign them the corresponding App Role:
-
-| Username | App Role | Notes |
-|---|---|---|
-| `alice@yourdomain.com` | `Administrator` | Full access, all tenants in audit |
-| `bob@yourdomain.com` | `Superintendent` | Can approve logbooks, view own tenant audit |
-| `charlie@yourdomain.com` | `VesselUser` | Can submit logbook entries |
-| `diana@yourdomain.com` | `ReadOnlyUser` | View-only access |
-
-After obtaining a token for a user, paste it into the Swagger **Authorize** dialog as:
-```
-Bearer eyJhbGci...
-```
+## Part 11 — Current Status & What's Not Done Yet
+
+- ✅ Real Entra ID OAuth 2.0 + RBAC + audit logging (backend, fully implemented and tested)
+- ✅ SQLite-backed, ship-scoped authorization (`UserShipRelationship`)
+- ✅ MCP tool server (read-only, same auth as REST)
+- ✅ Angular dashboard, currently on mock demo login
+- ⬜ Angular UI not yet wired to real Entra ID/MSAL — needs Azure Portal setup (SPA redirect URI, exposed API scope, permissions/consent) and re-adding `@azure/msal-browser`
+- ⬜ MCP OAuth protected-resource metadata (`.well-known/oauth-protected-resource`) — not required for the current demo, would improve auto-discovery for third-party MCP clients later

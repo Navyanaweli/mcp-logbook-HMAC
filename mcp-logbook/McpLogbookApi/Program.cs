@@ -32,6 +32,15 @@ builder.Services.AddMcpServer()
     .WithHttpTransport(options => options.Stateless = true)
     .WithToolsFromAssembly();
 
+// ── CORS — Angular dev server ──────────────────────────────────
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AngularDev", policy => policy
+        .WithOrigins("http://localhost:4200")
+        .AllowAnyHeader()
+        .AllowAnyMethod());
+});
+
 // ── OAuth 2.0 / Microsoft Entra ID Authentication ─────────────
 var azureAd = builder.Configuration.GetSection("AzureAd");
 
@@ -110,6 +119,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseCors("AngularDev");
 
 // Must wrap auth so 401/403 responses are captured
 app.UseMiddleware<ObservabilityMiddleware>();

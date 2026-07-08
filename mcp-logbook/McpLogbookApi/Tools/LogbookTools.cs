@@ -6,7 +6,7 @@ using ModelContextProtocol.Server;
 
 namespace McpLogbookApi.Tools;
 
-// Read-only MCP tools — no create/update/delete tools exist in this class or project.
+// Read-only MCP tools
 // Reuses LogbookRepository and the same ship-scoped authorization as McpController.
 [McpServerToolType]
 public class LogbookTools

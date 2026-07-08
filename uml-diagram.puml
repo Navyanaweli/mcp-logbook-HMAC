@@ -6,64 +6,204 @@ skinparam class {
     BorderColor Black
     ArrowColor Black
 }
-
-class McpController {
-    - _audit : AuditService
-    + AdminOnly() : IActionResult
-    + SuperintendentAccess() : IActionResult
-    + VesselUserAccess() : IActionResult
-    + ReadOnlyAccess() : IActionResult
-    + GetLogbooks() : IActionResult
+skinparam entity {
+    BackgroundColor #FDF6E3
+    BorderColor #8B7500
 }
+skinparam packageStyle rectangle
 
-class AuditController {
-    - _audit : AuditService
-    + GetAllLogs() : IActionResult
-    + GetMyTenantLogs() : IActionResult
-}
+' ══════════════════════════════════════════════════════════════
+' Web API + MCP layer (mcp-logbook/McpLogbookApi)
+' ══════════════════════════════════════════════════════════════
+package "Web API & MCP Layer" {
 
-class AuditService {
-    - _logs : List<AuditEntry>
-    - _logFilePath : string?
-    + Log(user, role, tenantId, ...) : void
-    + GetLogs() : List<AuditEntry>
-    + GetLogsForTenant(tenantId) : List<AuditEntry>
-}
+    class McpController {
+        - _audit : AuditService
+        - _repo : LogbookRepository
+        + Me() : IActionResult
+        + ReadOnlyAccess() : IActionResult
+        + GetLogbooks() : IActionResult
+        + GetLogbookById(id: int) : IActionResult
+    }
 
-class ObservabilityMiddleware {
-    - _audit : AuditService
-    + InvokeAsync(context) : Task
-}
+    class AuditController {
+        - _audit : AuditService
+        + GetAllLogs() : IActionResult
+        + GetMyTenantLogs() : IActionResult
+    }
 
-class AuditEntry <<record>> {
-    + User : string
-    + Role : string
-    + TenantId : string
-    + ClientId : string
-    + Action : string
-    + AuthResult : string
-    + ExecutionStatus : string
-    + HttpMethod : string
-    + StatusCode : int
-    + DurationMs : long
-    + Timestamp : DateTime
-}
+    class LogbookTools <<McpServerToolType>> {
+        - _repo : LogbookRepository
+        - _httpContextAccessor : IHttpContextAccessor
+        + GetLogbookEntries() : IReadOnlyList<ShipLogEntry>
+        + SearchLogbookEntries(query: string) : IReadOnlyList<ShipLogEntry>
+        + GetLogbookEntryById(id: int) : ShipLogEntry?
+    }
 
-class LogbookEntry <<record>> {
-    + Id : string
-    + Title : string
-    + TenantId : string
+    class LogbookRepository {
+        - _connectionString : string
+        + GetAssignedShipIds(email: string) : IReadOnlyList<int>
+        + GetAssignedShips(email: string) : IReadOnlyList<AssignedShip>
+        + GetShipLogs(shipIds) : IReadOnlyList<ShipLogEntry>
+        + GetShipLogById(id: int) : ShipLogEntry?
+    }
+
+    class AuditService {
+        - _logs : List<AuditEntry>
+        - _logFilePath : string?
+        - _fileLock : object
+        + Log(user, role, tenantId, clientId, action, authResult, executionStatus, httpMethod, statusCode, durationMs) : void
+        + GetLogs() : List<AuditEntry>
+        + GetLogsForTenant(tenantId) : List<AuditEntry>
+    }
+
+    class ObservabilityMiddleware {
+        - _audit : AuditService
+        + InvokeAsync(context) : Task
+    }
+
+    class DatabaseInitializer <<static>> {
+        + EnsureCreated(connectionString, dataDirectory) : void
+    }
+
+    class AuditEntry <<record>> {
+        + User : string
+        + Role : string
+        + TenantId : string
+        + ClientId : string
+        + Action : string
+        + AuthResult : string
+        + ExecutionStatus : string
+        + HttpMethod : string
+        + StatusCode : int
+        + DurationMs : long
+        + Timestamp : DateTime
+    }
+
+    class ShipLogEntry <<record>> {
+        + ShipLogId : int
+        + ShipId : int
+        + ShipName : string
+        + LogText : string
+        + LogDate : string
+    }
+
+    class AssignedShip <<record>> {
+        + ShipId : int
+        + ShipName : string
+    }
 }
 
 McpController --> AuditService : uses
+McpController --> LogbookRepository : uses
 AuditController --> AuditService : uses
 ObservabilityMiddleware --> AuditService : uses
+LogbookTools --> LogbookRepository : uses
 AuditService --> AuditEntry : creates
-McpController ..> LogbookEntry : returns
+LogbookRepository ..> ShipLogEntry : returns
+LogbookRepository ..> AssignedShip : returns
+McpController ..> ShipLogEntry : returns
+LogbookTools ..> ShipLogEntry : returns
+
+' ══════════════════════════════════════════════════════════════
+' SQLite database schema (Data/schema.sql)
+' ══════════════════════════════════════════════════════════════
+package "SQLite Database (logbook.db)" {
+
+    entity Users {
+        * UserId : INTEGER <<PK>>
+        --
+        UserName : TEXT
+        Email : TEXT <<unique>>
+    }
+
+    entity Ships {
+        * ShipId : INTEGER <<PK>>
+        --
+        ShipName : TEXT
+    }
+
+    entity UserShipRelationship {
+        * UserShipRelationshipId : INTEGER <<PK>>
+        --
+        UserId : INTEGER <<FK>>
+        ShipId : INTEGER <<FK>>
+        CreatedAt : TEXT
+    }
+
+    entity ShipDetail {
+        * ShipDetailId : INTEGER <<PK>>
+        --
+        ShipId : INTEGER <<FK, unique>>
+        ShipName : TEXT
+        ImoNumber : TEXT
+        FlagState : TEXT
+        ShipType : TEXT
+        Owner : TEXT
+        ... (25+ more descriptive columns)
+    }
+
+    entity ShipLogTable {
+        * ShipLogId : INTEGER <<PK>>
+        --
+        ShipId : INTEGER <<FK>>
+        LogText : TEXT
+        LogDate : TEXT
+    }
+}
+
+Users "1" -- "0..*" UserShipRelationship
+Ships "1" -- "0..*" UserShipRelationship
+Ships "1" -- "0..1" ShipDetail
+Ships "1" -- "0..*" ShipLogTable
+
+LogbookRepository ..> Users : "queries (by email)"
+LogbookRepository ..> UserShipRelationship : "queries"
+LogbookRepository ..> Ships : "queries"
+LogbookRepository ..> ShipLogTable : "queries"
+
+' ══════════════════════════════════════════════════════════════
+' Notes — auth, RBAC, and cross-cutting config (all in Program.cs)
+' ══════════════════════════════════════════════════════════════
 
 note top of McpController
-  Roles: Admin > Superintendent
-  > VesselUser > ReadOnly
+  **RBAC policies** (Program.cs):
+  AdminOnly        : Administrator
+  SuperintendentUp : Administrator, Superintendent
+  ReadOnlyUp       : Administrator, Superintendent,
+                     VesselUser, ReadOnlyUser
+
+  Me() / ReadOnlyAccess() / GetLogbooks() /
+  GetLogbookById() all require ReadOnlyUp.
+  GetLogbookById() returns an identical 404
+  whether the entry doesn't exist or the
+  caller isn't assigned to its ship.
+end note
+
+note top of LogbookTools
+  Exposed via ModelContextProtocol SDK:
+  AddMcpServer().WithHttpTransport()
+    .WithToolsFromAssembly()
+  MapMcp("/mcp").RequireAuthorization("ReadOnlyUp")
+
+  Read-only only — no create/update/delete
+  tools exist anywhere in the project.
+end note
+
+note bottom of AuditService
+  Authentication (Program.cs):
+  AddAuthentication().AddJwtBearer(options => {
+    Authority = AzureAd:Authority   (Entra ID)
+    Audience  = AzureAd:ClientId
+  })
+  Real OAuth 2.0 access tokens only — no
+  locally-issued or fabricated JWTs.
+end note
+
+note bottom of ShipLogTable
+  DatabaseInitializer.EnsureCreated() runs
+  schema.sql + seed_data.sql once, on first
+  app startup, if logbook.db doesn't exist yet.
 end note
 
 @enduml

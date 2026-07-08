@@ -1,0 +1,139 @@
+<div class="app-shell" *ngIf="isReady; else loading">
+
+  <!-- ═══════════ LOGIN VIEW ═══════════ -->
+  <div class="login-screen" *ngIf="!isLoggedIn">
+    <div class="login-card">
+      <div class="brand">
+        <span class="brand-mark">NAVTOR</span>
+        <span class="brand-sub">Ship Logbook</span>
+      </div>
+
+      <span class="demo-badge">Demo mode</span>
+      <p class="login-tagline">Choose a demo user to view their authorized logbook entries.</p>
+
+      <select class="input select" [(ngModel)]="selectedEmail">
+        <option value="" disabled selected>Select a demo user…</option>
+        <option *ngFor="let user of demoUsers" [value]="user.email">{{ user.userName }} ({{ user.email }})</option>
+      </select>
+
+      <button class="btn btn-primary btn-block" (click)="login()">
+        Login
+      </button>
+
+      <p class="login-error" *ngIf="loginError">{{ loginError }}</p>
+
+      <p class="login-hint">Local demo login only — not a real sign-in. No password, no Microsoft account involved.</p>
+
+      <!-- Extension point: a "Sign in with Microsoft" option belongs here later,
+           as a second path alongside the demo dropdown above (see the note in
+           auth.service.ts) — not a replacement of it. -->
+    </div>
+  </div>
+
+  <!-- ═══════════ DASHBOARD VIEW ═══════════ -->
+  <div class="dashboard" *ngIf="isLoggedIn">
+
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark">NAVTOR</span>
+        <span class="brand-sub">Ship Logbook</span>
+      </div>
+      <button class="btn btn-outline" (click)="logout()">Logout</button>
+    </header>
+
+    <section class="user-panel">
+      <div class="user-info">
+        <div class="info-block">
+          <span class="info-label">Logged in as</span>
+          <span class="info-value">{{ currentUser?.username || '—' }}</span>
+        </div>
+        <div class="info-block">
+          <span class="info-label">Role</span>
+          <span class="info-value badge">{{ currentUser?.role || '—' }}</span>
+        </div>
+        <div class="info-block">
+          <span class="info-label">Authorized ships</span>
+          <span class="info-value">
+            <span class="ship-chip" *ngFor="let ship of currentUser?.ships">{{ ship.shipName }}</span>
+            <span *ngIf="!currentUser?.ships?.length">None assigned</span>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <p class="load-error" *ngIf="loadError">{{ loadError }}</p>
+
+    <section class="stats-row">
+      <div class="stat-card">
+        <span class="stat-value">{{ logbooks.length }}</span>
+        <span class="stat-label">Authorized Logbook Entries</span>
+      </div>
+    </section>
+
+    <section class="search-card">
+      <h3>Search by Logbook ID</h3>
+      <div class="search-row">
+        <input
+          type="text"
+          class="input"
+          placeholder="Enter logbook ID, e.g. 3"
+          [(ngModel)]="searchId"
+          (keyup.enter)="searchById()"
+        />
+        <button class="btn btn-primary" (click)="searchById()" [disabled]="searching">
+          {{ searching ? 'Searching…' : 'Search' }}
+        </button>
+        <button class="btn btn-outline" (click)="clearSearch()" *ngIf="searchResult || searchError">
+          Clear
+        </button>
+      </div>
+
+      <p class="search-error" *ngIf="searchError">{{ searchError }}</p>
+
+      <div class="search-result" *ngIf="searchResult">
+        <div class="result-row"><span class="info-label">Log ID</span><span>{{ searchResult.shipLogId }}</span></div>
+        <div class="result-row"><span class="info-label">Ship</span><span>{{ searchResult.shipName }}</span></div>
+        <div class="result-row"><span class="info-label">Date</span><span>{{ searchResult.logDate }}</span></div>
+        <div class="result-row"><span class="info-label">Entry</span><span>{{ searchResult.logText }}</span></div>
+      </div>
+    </section>
+
+    <section class="table-card">
+      <h3>Authorized Logbook Entries</h3>
+
+      <table class="logbook-table" *ngIf="logbooks.length; else emptyState">
+        <thead>
+          <tr>
+            <th>Log ID</th>
+            <th>Ship Name</th>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Log Entry / Description</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let entry of logbooks">
+            <td>{{ entry.shipLogId }}</td>
+            <td>{{ entry.shipName }}</td>
+            <td>{{ entry.logDate }}</td>
+            <td class="muted">—</td>
+            <td class="log-text">{{ entry.logText }}</td>
+            <td>
+              <button class="btn btn-link" (click)="viewEntry(entry)">View</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <ng-template #emptyState>
+        <p class="empty-state">No logbook entries for your assigned ships.</p>
+      </ng-template>
+    </section>
+
+  </div>
+</div>
+
+<ng-template #loading>
+  <div class="loading-screen">Loading…</div>
+</ng-template>
