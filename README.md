@@ -274,31 +274,3 @@ Both tools share the exact signing logic in `HmacRequestSigner.cs` (linked betwe
 projects, not a shared assembly reference — a real external client is a separate codebase
 with no access to this repo).
 
-## Known limitations / next steps
-
-- **Replay protection is a process-local in-memory cache.** Once a signature is verified it's
-  registered in a `ConcurrentDictionary` (expiring after the same 5-minute window as the
-  timestamp check) and rejected if seen again, so an exact-repeat replay within the window now
-  fails. This doesn't survive an app restart and wouldn't catch a replay against a different
-  instance behind a load balancer — fine for this POC's single-instance deployment, but a
-  shared cache (e.g. Redis) would be needed for a multi-instance one.
-- **Admin auth is a single well-known HMAC identity**, appropriate for this POC but not for a
-  real multi-admin deployment (no per-admin identity, no rotation story, no scoping).
-- **The Angular UI (`logbook-ui/`) no longer has a backend to talk to.** Its demo login
-  dropdown depended on `DemoController` and the `Users`/`UserShipRelationship` tables, which
-  were removed along with Entra ID (they were the internal-user access model Entra ID used).
-  The UI itself was left untouched — wiring it to the HMAC model, or retiring it, is a
-  separate decision.
-- **MCP OAuth protected-resource metadata** is not implemented — not required now that HMAC
-  is the only auth path, but relevant if this API is ever exposed to MCP clients that expect
-  the standard OAuth discovery flow.
-
-## History
-
-This API originally supported two parallel authentication paths: this HMAC path for external
-clients, and a Microsoft Entra ID (Azure AD) OAuth 2.0 path with four RBAC roles
-(`Administrator`, `Superintendent`, `VesselUser`, `ReadOnlyUser`) for internal per-user access,
-scoped via a `Users`/`UserShipRelationship` table. The Entra ID path, its RBAC policies, the
-internal `AuditService`/`ObservabilityMiddleware` (identity-shaped audit logging tied to Entra
-claims), and the `Users`/`UserShipRelationship` tables have all been removed — this project is
-now exclusively the external HMAC-client-facing API described above.
