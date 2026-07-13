@@ -1,25 +1,18 @@
--- Seed data for Users, Ships, UserShipRelationship, ShipDetail, ShipLogTable
+-- Seed data for Companies, Ships, ShipDetail, ShipLogTable
 -- Dialect: SQLite
 -- Run after schema.sql
 
--- Users
-INSERT INTO Users (UserId, UserName, Email) VALUES
-(1, 'Alice Mercer', 'alice.mercer@example.com'),
-(2, 'Rahul Verma', 'rahul.verma@example.com'),
-(3, 'Sofia Nunez', 'sofia.nunez@example.com');
+-- Companies (declared before Ships since every ship now belongs to exactly one company)
+INSERT INTO Companies (CompanyId, CompanyName) VALUES
+(1, 'Ocean Star Shipping Co.'),
+(2, 'Pacific Container Lines');
 
--- Ships
-INSERT INTO Ships (ShipId, ShipName) VALUES
-(1, 'MV OCEAN STAR'),
-(2, 'MV NORTHERN LIGHT'),
-(3, 'MV PACIFIC DAWN');
-
--- UserShipRelationship
-INSERT INTO UserShipRelationship (UserId, ShipId) VALUES
-(1, 1),
-(1, 2),
-(2, 2),
-(3, 3);
+-- Ships: Ocean Star Shipping Co. (CompanyId 1) owns MV OCEAN STAR + MV NORTHERN LIGHT,
+-- Pacific Container Lines (CompanyId 2) owns MV PACIFIC DAWN
+INSERT INTO Ships (ShipId, ShipName, CompanyId) VALUES
+(1, 'MV OCEAN STAR', 1),
+(2, 'MV NORTHERN LIGHT', 1),
+(3, 'MV PACIFIC DAWN', 2);
 
 -- ShipDetail
 INSERT INTO ShipDetail (

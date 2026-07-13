@@ -1,19 +1,7 @@
-## .NET build output
 bin/
 obj/
-
-## Visual Studio / Rider / VS Code
-.vs/
-.vscode/*
-!.vscode/extensions.json
 *.user
-*.suo
-
-## Test results
-[Tt]est[Rr]esult*/
-*.trx
-
-## Misc
-*.log
-audit-log.jsonl
-*.db
+.vs/
+Data/logbook.db
+Data/demo-client-credentials*.json
+appsettings.Development.json

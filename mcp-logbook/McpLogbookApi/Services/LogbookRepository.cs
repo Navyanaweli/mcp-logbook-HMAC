@@ -3,7 +3,7 @@ using Microsoft.Data.Sqlite;
 
 namespace McpLogbookApi.Services;
 
-// Read-only queries against ShipLogTable, scoped by UserShipRelationship
+// Read-only queries against ShipLogTable, scoped by Ships.CompanyId
 public class LogbookRepository
 {
     private readonly string _connectionString;
@@ -14,37 +14,24 @@ public class LogbookRepository
             ?? throw new InvalidOperationException("ConnectionStrings:LogbookDb is not configured.");
     }
 
-    // All seeded users — for the demo login dropdown only (see DemoController)
-    public IReadOnlyList<DemoUser> GetAllUsers()
+    // Ship IDs owned by the given set of companies, via Ships.CompanyId
+    public IReadOnlyList<int> GetShipIdsForCompanies(IReadOnlyList<int> companyIds)
     {
+        if (companyIds.Count == 0)
+            return [];
+
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Email, UserName FROM Users ORDER BY UserName";
-
-        var users = new List<DemoUser>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-            users.Add(new DemoUser(reader.GetString(0), reader.GetString(1)));
-
-        return users;
-    }
-
-    // Ship IDs the given user (by email) is assigned to
-    public IReadOnlyList<int> GetAssignedShipIds(string email)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT usr.ShipId
-            FROM UserShipRelationship usr
-            JOIN Users u ON u.UserId = usr.UserId
-            WHERE u.Email = @email
+        var placeholders = string.Join(",", companyIds.Select((_, i) => $"@company{i}"));
+        command.CommandText = $"""
+            SELECT ShipId
+            FROM Ships
+            WHERE CompanyId IN ({placeholders})
             """;
-        command.Parameters.AddWithValue("@email", email);
+        for (var i = 0; i < companyIds.Count; i++)
+            command.Parameters.AddWithValue($"@company{i}", companyIds[i]);
 
         var shipIds = new List<int>();
         using var reader = command.ExecuteReader();
@@ -52,32 +39,6 @@ public class LogbookRepository
             shipIds.Add(reader.GetInt32(0));
 
         return shipIds;
-    }
-
-    // Ships the given user (by email) is assigned to, with names — used for display
-    // (e.g. the dashboard's "authorized ships" list), including ships with zero log entries
-    public IReadOnlyList<AssignedShip> GetAssignedShips(string email)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT s.ShipId, s.ShipName
-            FROM UserShipRelationship usr
-            JOIN Users u ON u.UserId = usr.UserId
-            JOIN Ships s ON s.ShipId = usr.ShipId
-            WHERE u.Email = @email
-            ORDER BY s.ShipName
-            """;
-        command.Parameters.AddWithValue("@email", email);
-
-        var ships = new List<AssignedShip>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-            ships.Add(new AssignedShip(reader.GetInt32(0), reader.GetString(1)));
-
-        return ships;
     }
 
     // Logbook entries for the given set of ships

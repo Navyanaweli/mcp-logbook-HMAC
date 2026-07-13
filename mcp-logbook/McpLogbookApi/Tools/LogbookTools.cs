@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Security.Claims;
 using McpLogbookApi.Models;
 using McpLogbookApi.Services;
 using ModelContextProtocol.Server;
@@ -12,31 +11,32 @@ namespace McpLogbookApi.Tools;
 public class LogbookTools
 {
     private readonly LogbookRepository _repo;
+    private readonly AccessScopeResolver _scopeResolver;
     private readonly IHttpContextAccessor _httpContextAccessor;
 
-    public LogbookTools(LogbookRepository repo, IHttpContextAccessor httpContextAccessor)
+    public LogbookTools(LogbookRepository repo, AccessScopeResolver scopeResolver, IHttpContextAccessor httpContextAccessor)
     {
         _repo = repo;
+        _scopeResolver = scopeResolver;
         _httpContextAccessor = httpContextAccessor;
     }
 
-    // Literal claim type, not ClaimTypes.Name — see the same note in McpController
-    private string Username =>
-        _httpContextAccessor.HttpContext?.User.FindFirstValue("preferred_username") ?? "unknown";
+    // Resolves accessible ship IDs for either an internal Entra ID user or an external
+    // HMAC client — see AccessScopeResolver for the centralized scoping logic.
+    private IReadOnlyList<int> AccessibleShipIds =>
+        _httpContextAccessor.HttpContext is { } context ? _scopeResolver.GetAccessibleShipIds(context) : [];
 
     [McpServerTool, Description("Lists logbook entries for the ships the current user is assigned to.")]
     public IReadOnlyList<ShipLogEntry> GetLogbookEntries()
     {
-        var shipIds = _repo.GetAssignedShipIds(Username);
-        return _repo.GetShipLogs(shipIds);
+        return _repo.GetShipLogs(AccessibleShipIds);
     }
 
     [McpServerTool, Description("Searches logbook entries by log text, scoped to the ships the current user is assigned to.")]
     public IReadOnlyList<ShipLogEntry> SearchLogbookEntries(
         [Description("Text to search for within the log entry text.")] string query)
     {
-        var shipIds = _repo.GetAssignedShipIds(Username);
-        return _repo.GetShipLogs(shipIds)
+        return _repo.GetShipLogs(AccessibleShipIds)
             .Where(entry => entry.LogText.Contains(query, StringComparison.OrdinalIgnoreCase))
             .ToList();
     }
@@ -45,7 +45,7 @@ public class LogbookTools
     public ShipLogEntry? GetLogbookEntryById(
         [Description("The logbook entry id.")] int id)
     {
-        var shipIds = _repo.GetAssignedShipIds(Username);
+        var shipIds = AccessibleShipIds;
         var entry = _repo.GetShipLogById(id);
 
         // Returns null both when the entry doesn't exist and when it exists but belongs to

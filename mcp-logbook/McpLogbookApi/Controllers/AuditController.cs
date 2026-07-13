@@ -1,40 +1,30 @@
-using System.Security.Claims;
 using McpLogbookApi.Services;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace McpLogbookApi.Controllers;
 
-// Exposes audit log read endpoints
+// Admin-only read access to the external HMAC client audit log. Auth is enforced
+// upstream by AdminHmacAuthenticationMiddleware -- no [Authorize]/filter needed here.
 [ApiController]
 [Route("api/audit")]
-[Authorize]
 public class AuditController : ControllerBase
 {
-    private readonly AuditService _audit;
+    private readonly ExternalClientRepository _externalClientRepo;
 
-    // Reads tenant and role from Entra ID JWT claims
-    private string TenantId => User.FindFirstValue("tid") ?? "unknown";
-    private string Role     => User.FindFirstValue(ClaimTypes.Role) ?? "unknown";
-
-    public AuditController(AuditService audit)
+    public AuditController(ExternalClientRepository externalClientRepo)
     {
-        _audit = audit;
+        _externalClientRepo = externalClientRepo;
     }
 
-    // Admin only — returns every audit log
-    [HttpGet("all")]
-    [Authorize(Policy = "AdminOnly")]
-    public IActionResult GetAllLogs()
+    // Exclusively external HMAC client attempts (allowed and denied).
+    // Optional filters: clientId, date range, allowed/denied status.
+    [HttpGet("external")]
+    public IActionResult GetExternalClientLogs(
+        [FromQuery] Guid? clientId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] bool? allowed)
     {
-        return Ok(_audit.GetLogs());
-    }
-
-    // Superintendent+ — own tenant logs only
-    [HttpGet("my-tenant")]
-    [Authorize(Policy = "SuperintendentUp")]
-    public IActionResult GetMyTenantLogs()
-    {
-        return Ok(_audit.GetLogsForTenant(TenantId));
+        return Ok(_externalClientRepo.GetAuditLogs(clientId, from, to, allowed));
     }
 }
